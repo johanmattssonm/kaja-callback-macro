@@ -2,8 +2,8 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{parse_macro_input, ItemFn, LitStr};
 
-/// Make sures a function is registerd in JS for a given callback in the
-/// Kaja Web Framework (WebAssembly, Rust).
+/// This macro makes sure a function is registerd in JS DOM Window for a given callback
+/// in the Kaja Web Framework (WebAssembly, Rust).
 ///
 /// Example usage:
 /// ```
@@ -29,7 +29,6 @@ pub fn callback(attr: TokenStream, item: TokenStream) -> TokenStream {
     let js_name_lit = parse_macro_input!(attr as LitStr);
     let input_fn = parse_macro_input!(item as ItemFn);
     let fn_name = &input_fn.sig.ident;
-    let fn_name_lit = LitStr::new(&fn_name.to_string(), fn_name.span());
     let vis = &input_fn.vis;
     let sig = &input_fn.sig;
     let fn_block = &input_fn.block;
@@ -66,6 +65,10 @@ pub fn callback(attr: TokenStream, item: TokenStream) -> TokenStream {
                         cb.forget();
                     }
                 }
+
+                ::inventory::submit! {
+                    InitFn(#register_fn_name)
+                }
             }
         }
         _ => {
@@ -76,6 +79,5 @@ pub fn callback(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     };
 
-    eprintln!("generated macro expansion:\n{}", expanded);
     TokenStream::from(expanded)
 }
