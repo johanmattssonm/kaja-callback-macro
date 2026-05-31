@@ -7,7 +7,7 @@ use syn::{parse_macro_input, ItemFn, LitStr};
 ///
 /// Example usage:
 /// ```
-/// #[derive(Debug, serde::Deserialize)]
+/// #[derive(serde::Deserialize)]
 /// struct SomeClickEvent {
 ///     índex: usize,
 /// }
@@ -26,9 +26,37 @@ use syn::{parse_macro_input, ItemFn, LitStr};
 /// ```
 #[proc_macro_attribute]
 pub fn callback(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let js_name_lit = parse_macro_input!(attr as LitStr);
+    // parse attribute as either a string literal `"name"` or an identifier `name`
+    struct CallbackArg {
+        name: String,
+        span: proc_macro2::Span,
+    }
+
+    impl syn::parse::Parse for CallbackArg {
+        fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+            if input.peek(LitStr) {
+                let s: LitStr = input.parse()?;
+                Ok(CallbackArg {
+                    name: s.value(),
+                    span: s.span(),
+                })
+            } else if input.peek(syn::Ident) {
+                let id: syn::Ident = input.parse()?;
+                Ok(CallbackArg {
+                    name: id.to_string(),
+                    span: id.span(),
+                })
+            } else {
+                Err(input.error("expected string literal or identifier, e.g. #[callback(\"name\")] or #[callback(name)]"))
+            }
+        }
+    }
+
+    let callback_arg = parse_macro_input!(attr as CallbackArg);
+    let js_name_lit = LitStr::new(&callback_arg.name, callback_arg.span);
     let input_fn = parse_macro_input!(item as ItemFn);
     let fn_name = &input_fn.sig.ident;
+    let fn_name_lit = LitStr::new(&fn_name.to_string(), fn_name.span());
     let vis = &input_fn.vis;
     let sig = &input_fn.sig;
     let fn_block = &input_fn.block;
