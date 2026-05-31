@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, FnArg, ItemFn, LitStr};
+use syn::{parse_macro_input, ItemFn, LitStr};
 
 /// Make sures a function is registerd in JS for a given callback in the
 /// Kaja Web Framework (WebAssembly, Rust).
@@ -11,7 +11,7 @@ use syn::{parse_macro_input, FnArg, ItemFn, LitStr};
 /// struct SomeClickEvent {
 ///     índex: usize,
 /// }
-
+///
 /// #[callback("someClickCallback")]
 /// fn some_on_click_function(event: SomeClickEvent) {
 ///     log!("event.índex: {:?}", event.índex);
@@ -26,80 +26,56 @@ use syn::{parse_macro_input, FnArg, ItemFn, LitStr};
 /// ```
 #[proc_macro_attribute]
 pub fn callback(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let js_name = parse_macro_input!(attr as LitStr).value();
+    let js_name_lit = parse_macro_input!(attr as LitStr);
     let input_fn = parse_macro_input!(item as ItemFn);
-
     let fn_name = &input_fn.sig.ident;
+    let fn_name_lit = LitStr::new(&fn_name.to_string(), fn_name.span());
     let vis = &input_fn.vis;
     let sig = &input_fn.sig;
     let fn_block = &input_fn.block;
 
-    // Extract single argument type
-    let arg = input_fn
-        .sig
-        .inputs
-        .first()
-        .expect("callback must have one argument");
-
-    let arg_type = match arg {
-        FnArg::Typed(pat_type) => &pat_type.ty,
-        _ => panic!("expected typed argument"),
-    };
-
     let register_fn_name = syn::Ident::new(&format!("{}_register", fn_name), fn_name.span());
+    let register_fn_name_lit = LitStr::new(&register_fn_name.to_string(), register_fn_name.span());
 
-    let expanded = quote! {
-        #vis #sig #fn_block
+    let expanded = match input_fn.sig.inputs.len() {
+        0 => {
+            // No argument: ignore the JsValue passed from JS and call the function directly.
+            quote! {
+                #vis #sig #fn_block
 
-        pub fn #register_fn_name() {
-            use wasm_bindgen::closure::Closure;
-            use wasm_bindgen::JsCast;
+                #[wasm_bindgen]
+                pub fn #register_fn_name() {
+                    use wasm_bindgen::closure::Closure;
+                    use wasm_bindgen::JsCast;
+                    use js_sys::{Array, Object, Reflect};
+                    use wasm_bindgen::JsValue;
 
-            let window = web_sys::window();
+                    if let Some(window) = web_sys::window() {
+                        let cb = Closure::<dyn FnMut(wasm_bindgen::JsValue)>::new(|_val| {
+                            #fn_name();
+                        });
 
-            if window.is_none() {
-                gloo::console::log!("Callback error: {}. No window.", fn_name);
-                return;
-            }
+                        let _ = Reflect::set(
+                            window.as_ref(),
+                            &JsValue::from_str(#register_fn_name_lit),
+                            cb.as_ref().unchecked_ref(),
+                        );
 
-            let window = window.unwrap();
-            let callback_js_closure = Closure::<dyn FnMut(wasm_bindgen::JsValue)>::new(|val| {
-                let event: #arg_type =
-                    serde_wasm_bindgen::from_value(val);
-
-                if event.is_err() {
-                    gloo::console::log!("Callback error: {}. Wrong argument type: {}", fn_name, event.err().unwrap());
-                    return;
+                        let key = JsValue::from_str(#js_name_lit);
+                        let _ = Reflect::set(window.as_ref(), &key, cb.as_ref().unchecked_ref());
+                        cb.forget();
+                    }
                 }
-
-                let event = event.unwrap();
-                #fn_name(event);
-            });
-
-            let set = ::js_sys::Reflect::set(
-                &window,
-                &#js_name.into(),
-                cb.as_ref().unchecked_ref(),
-            );
-
-            if set.is_err() {
-                let err = set.err().unwrap();
-
-                gloo::console::log!(r#"Callback init error: {}, failed to set property on window.
-                    Needed in order to have callback available in JS land."#, err);
-
-                return;
             }
-
-            cb.forget();
         }
-
-        inventory::submit! {
-            CallbackRegistration {
-                register: #register_fn_name
-            }
+        _ => {
+            // More than one argument is not supported by this macro.
+            return TokenStream::from(quote! {
+                compile_error!("#[callback(...)] only supports functions with 0 arguments");
+            });
         }
     };
 
+    eprintln!("generated macro expansion:\n{}", expanded);
     TokenStream::from(expanded)
 }
