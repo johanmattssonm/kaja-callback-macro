@@ -56,7 +56,6 @@ pub fn callback(attr: TokenStream, item: TokenStream) -> TokenStream {
     let js_name_lit = LitStr::new(&callback_arg.name, callback_arg.span);
     let input_fn = parse_macro_input!(item as ItemFn);
     let fn_name = &input_fn.sig.ident;
-    let fn_name_lit = LitStr::new(&fn_name.to_string(), fn_name.span());
     let vis = &input_fn.vis;
     let sig = &input_fn.sig;
     let fn_block = &input_fn.block;
