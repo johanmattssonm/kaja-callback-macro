@@ -1,6 +1,7 @@
 use proc_macro::TokenStream;
+use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
-use syn::{parse_macro_input, FnArg, ItemFn, LitStr};
+use syn::{parse_macro_input, FnArg, Ident, ItemFn, LitStr};
 
 /// This macro makes sure a function is registerd in JS DOM Window for a given callback
 /// in the Kaja Web Framework (WebAssembly, Rust).
@@ -36,30 +37,7 @@ pub fn callback(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let register_fn_name = syn::Ident::new(&format!("{}_register", fn_name), fn_name.span());
     let register_fn_name_lit = LitStr::new(&register_fn_name.to_string(), register_fn_name.span());
-
-    // Extract single argument type
-    let arg = input_fn
-        .sig
-        .inputs
-        .first()
-        .expect("callback must have one argument");
-
-    let arg_type1 = match arg {
-        FnArg::Typed(pat_type) => &pat_type.ty,
-        _ => panic!("expected typed argument"),
-    };
-
-    let arg2 = input_fn
-        .sig
-        .inputs
-        .iter()
-        .nth(1)
-        .expect("callback must have one argument");
-
-    let arg_type2 = match arg2 {
-        FnArg::Typed(pat_type) => &pat_type.ty,
-        _ => panic!("expected typed argument"),
-    };
+    let callback_closure = generate_callback_closure(&fn_name, input_fn.sig.inputs.clone());
 
     let expanded = {
         quote! {
@@ -73,28 +51,7 @@ pub fn callback(attr: TokenStream, item: TokenStream) -> TokenStream {
                 use wasm_bindgen::JsValue;
 
                 if let Some(window) = web_sys::window() {
-                    let callback_js_closure = Closure::<dyn FnMut(wasm_bindgen::JsValue, wasm_bindgen::JsValue)>::new(|val, val2| {
-                        let event: #arg_type1 =
-                            serde_wasm_bindgen::from_value(val);
-
-                        if event.is_err() {
-                            gloo::console::log!("Callback error: {}. Wrong argument type: {}", fn_name, event.err().unwrap());
-                            return;
-                        }
-
-                        let event2: #arg_type2 =
-                            serde_wasm_bindgen::from_value(val2);
-
-                        if event2.is_err() {
-                            gloo::console::log!("Callback error: {}. Wrong argument type: {}", fn_name, event2.err().unwrap());
-                            return;
-                        }
-
-                        let event = event.unwrap();
-                        let event2 = event.unwrap();
-
-                        #fn_name(event, event2);
-                    });
+                    #callback_closure;
 
                     let _ = Reflect::set(
                         window.as_ref(),
@@ -115,6 +72,122 @@ pub fn callback(attr: TokenStream, item: TokenStream) -> TokenStream {
     };
 
     TokenStream::from(expanded)
+}
+
+fn generate_callback_closure(
+    fn_name: &Ident,
+    inputs: syn::punctuated::Punctuated<FnArg, syn::token::Comma>,
+) -> proc_macro2::TokenStream {
+    use proc_macro2::Span;
+    use quote::quote;
+
+    if inputs.iter().len() == 3 {
+        let expanded = quote! {
+            let cb = Closure::<dyn FnMut(wasm_bindgen::JsValue, wasm_bindgen::JsValue, wasm_bindgen::JsValue)>::new(|val, val2, val3| {
+                #fn_name(1, 2, 3);
+            });
+        };
+
+        return expanded;
+    }
+
+    if inputs.iter().len() == 2 {
+        let expanded = quote! {
+            let cb = Closure::<dyn FnMut(wasm_bindgen::JsValue, wasm_bindgen::JsValue)>::new(|val, val2| {
+                let event = Test1Data {
+                    test_parameter: "test".to_string(),
+                };
+
+                let event2 = "serialized".to_string();
+
+                #fn_name(event, event2);
+            });
+        };
+
+        return expanded;
+    }
+
+    if inputs.iter().len() == 1 {
+        let expanded = quote! {
+            let cb = Closure::<dyn FnMut(wasm_bindgen::JsValue)>::new(|val| {
+                let event = Test1Data {
+                    test_parameter: "test".to_string(),
+                };
+
+                #fn_name(event);
+            });
+        };
+
+        return expanded;
+    }
+
+    let expanded = quote! {
+        let cb = Closure::<dyn FnMut()>::new(|| {
+            #fn_name();
+        });
+    };
+
+    return expanded;
+
+    let mut js_arg_idents: Vec<syn::Ident> = Vec::new(); // val0, val1, ... lambda arguments
+    let mut rust_arg_types: Vec<syn::Type> = Vec::new(); // extracted types form the annotated rust function
+    let mut rs_arg_idents: Vec<syn::Ident> = Vec::new(); // arg0, arg1, ... converted from val0, val1,
+    let mut temp_result_idents: Vec<syn::Ident> = Vec::new(); // res0, res1, ... result for serde parser
+
+    for (i, arg) in inputs.iter().enumerate() {
+        let span = Span::call_site();
+        let val_ident = syn::Ident::new(&format!("val{}", i), span);
+        js_arg_idents.push(val_ident);
+
+        let rs_ident = syn::Ident::new(&format!("arg{}", i), span);
+        rs_arg_idents.push(rs_ident);
+
+        let res_ident = syn::Ident::new(&format!("res{}", i), span);
+        temp_result_idents.push(res_ident);
+
+        match arg {
+            FnArg::Typed(pat_type) => {
+                rust_arg_types.push((*pat_type.ty).clone());
+            }
+            _ => panic!("expected typed argument"),
+        }
+    }
+
+    let js_value_type = quote! { wasm_bindgen::JsValue };
+    let js_types: Vec<proc_macro2::TokenStream> = (0..js_arg_idents.len())
+        .map(|_| js_value_type.clone())
+        .collect();
+
+    let mut conversions = Vec::new();
+    for ((res_ident, rs_ident), (val_ident, ty)) in temp_result_idents
+        .iter()
+        .zip(rs_arg_idents.iter())
+        .zip(js_arg_idents.iter().zip(rust_arg_types.iter()))
+    {
+        conversions.push(quote! {
+            let #res_ident = serde_wasm_bindgen::from_value::<#ty>(#val_ident.clone());
+            if #res_ident.is_err() {
+                gloo::console::log!(
+                    concat!("Callback error: ", stringify!(#fn_name), ". Wrong argument type: "),
+                    #res_ident.err().unwrap()
+                );
+                return;
+            }
+            let #rs_ident = #res_ident.unwrap();
+        });
+    }
+
+    let call_args = rs_arg_idents.iter();
+    let cb_tokens = quote! {
+        let cb = Closure::wrap(Box::new(move | #(#js_arg_idents),* | {
+            #(#conversions)*
+
+            // call the original Rust function with the converted args
+            #fn_name( #(#call_args),* );
+        }) as Box<dyn FnMut( #(#js_types),* ) + 'static>);
+    };
+
+    cb_tokens
 }
 
 struct CallbackArg {
