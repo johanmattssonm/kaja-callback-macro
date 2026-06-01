@@ -55,13 +55,13 @@ pub fn callback(attr: TokenStream, item: TokenStream) -> TokenStream {
                     let previous = match Reflect::get(window.as_ref(), &JsValue::from_str(#register_fn_name_lit)) {
                         Ok(v) => v,
                         Err(e) => {
-                            ::gloo::console::log!("Callback registration check failed:", e);
+                            ::gloo::console::error!("Callback registration check failed:", e);
                             JsValue::UNDEFINED
                         }
                     };
 
                     if !previous.is_undefined() {
-                        ::gloo::console::log!("Callback already registered: {}. Callbacks are global on the entire document", #register_fn_name_lit);
+                        ::gloo::console::error!("Callback already registered: {}. Callbacks are global on the entire document", #register_fn_name_lit);
                         return;
                     }
 
@@ -93,7 +93,7 @@ pub fn callback(attr: TokenStream, item: TokenStream) -> TokenStream {
             serde_wasm_bindgen::from_value(val);
 
         if event.is_err() {
-            gloo::console::log!("Callback error: {}. Wrong argument type: {}", fn_name, event.err().unwrap());
+            gloo::console::error!("Callback error: {}. Wrong argument type: {}", fn_name, event.err().unwrap());
             return;
         }
 
@@ -101,7 +101,7 @@ pub fn callback(attr: TokenStream, item: TokenStream) -> TokenStream {
             serde_wasm_bindgen::from_value(val2);
 
         if event2.is_err() {
-            gloo::console::log!("Callback error: {}. Wrong argument type: {}", fn_name, event2.err().unwrap());
+            gloo::console::error!("Callback error: {}. Wrong argument type: {}", fn_name, event2.err().unwrap());
             return;
         }
 
@@ -122,7 +122,7 @@ fn generate_callback_closure(
     let mut js_arg_idents: Vec<syn::Ident> = Vec::new(); // val0, val1, ... lambda arguments
     let mut rust_arg_types: Vec<syn::Type> = Vec::new(); // extracted types form the annotated rust function
     let mut rs_arg_idents: Vec<syn::Ident> = Vec::new(); // arg0, arg1, ... converted from val0, val1,
-    let mut temp_result_idents: Vec<syn::Ident> = Vec::new(); // res0, res1, ... result for serde parser
+    let mut temp_result_idents: Vec<syn::Ident> = Vec::new(); // res0, res1, ... result from serde parser
 
     for (i, arg) in inputs.iter().enumerate() {
         let span = Span::call_site();
