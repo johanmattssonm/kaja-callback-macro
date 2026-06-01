@@ -81,11 +81,140 @@ fn generate_callback_closure(
     use proc_macro2::Span;
     use quote::quote;
 
-    if inputs.iter().len() == 3 {
+    let mut js_value_types: Vec<proc_macro2::TokenStream> = Vec::new(); // array of wasm_bindgen::JsValue,
+    let mut js_arg_idents: Vec<syn::Ident> = Vec::new(); // val0, val1, ... lambda arguments
+    let mut rust_arg_types: Vec<syn::Type> = Vec::new(); // extracted types form the annotated rust function
+    let mut rs_arg_idents: Vec<syn::Ident> = Vec::new(); // arg0, arg1, ... converted from val0, val1,
+    let mut temp_result_idents: Vec<syn::Ident> = Vec::new(); // res0, res1, ... result for serde parser
+
+    for (i, arg) in inputs.iter().enumerate() {
+        let span = Span::call_site();
+
+        let js_value_type = quote! { wasm_bindgen::JsValue };
+        js_value_types.push(js_value_type);
+
+        let val_ident = syn::Ident::new(&format!("val{}", i), span);
+        js_arg_idents.push(val_ident);
+
+        let rs_ident = syn::Ident::new(&format!("arg{}", i), span);
+        rs_arg_idents.push(rs_ident);
+
+        let res_ident = syn::Ident::new(&format!("res{}", i), span);
+        temp_result_idents.push(res_ident);
+
+        match arg {
+            FnArg::Typed(pat_type) => {
+                rust_arg_types.push((*pat_type.ty).clone());
+            }
+            _ => panic!("expected typed argument"),
+        }
+    }
+
+    if inputs.len() == 3 {
+        let mut conversions = Vec::new();
+        for ((res_ident, rs_ident), (val_ident, ty)) in temp_result_idents
+            .iter()
+            .zip(rs_arg_idents.iter())
+            .zip(js_arg_idents.iter().zip(rust_arg_types.iter()))
+        {
+            // attempt simple conversions for common primitive types to avoid requiring
+            // serde_wasm_bindgen in the consumer crate. Fall back to serde for other types.
+            let conv = if let syn::Type::Path(type_path) = ty {
+                if let Some(seg) = type_path.path.segments.last() {
+                    let ident_str = seg.ident.to_string();
+                    match ident_str.as_str() {
+                        "u32" | "i32" | "usize" | "f64" => {
+                            quote! {
+                                let #res_ident: Option<#ty> = #val_ident.as_f64().map(|v| v as #ty);
+                                if #res_ident.is_none() {
+                                    gloo::console::log!(
+                                        concat!("Callback error: ", stringify!(#fn_name), ". Wrong argument")
+                                    );
+                                    return;
+                                }
+                                let #rs_ident = #res_ident.unwrap();
+                            }
+                        }
+                        "bool" => {
+                            quote! {
+                                let #res_ident: Option<#ty> = #val_ident.as_bool();
+                                if #res_ident.is_none() {
+                                    gloo::console::log!(
+                                        concat!("Callback error: ", stringify!(#fn_name), ". Wrong argument")
+                                    );
+                                    return;
+                                }
+                                let #rs_ident = #res_ident.unwrap();
+                            }
+                        }
+                        "String" => {
+                            quote! {
+                                let #res_ident: Option<#ty> = #val_ident.as_string();
+                                if #res_ident.is_none() {
+                                    gloo::console::log!(
+                                        concat!("Callback error: ", stringify!(#fn_name), ". Wrong argument")
+                                    );
+                                    return;
+                                }
+                                let #rs_ident = #res_ident.unwrap();
+                            }
+                        }
+                        _ => {
+                            quote! {
+                                let #res_ident = serde_wasm_bindgen::from_value::<#ty>(#val_ident.clone());
+                                if #res_ident.is_err() {
+                                    gloo::console::log!(
+                                        concat!("Callback error: ", stringify!(#fn_name), ". Wrong argument"),
+                                        #res_ident.err().unwrap()
+                                    );
+                                    return;
+                                }
+                                let #rs_ident = #res_ident.unwrap();
+                            }
+                        }
+                    }
+                } else {
+                    // fallback
+                    quote! {
+                        let #res_ident = serde_wasm_bindgen::from_value::<#ty>(#val_ident.clone());
+                        if #res_ident.is_err() {
+                            gloo::console::log!(
+                                concat!("Callback error: ", stringify!(#fn_name), ". Wrong argument"),
+                                #res_ident.err().unwrap()
+                            );
+                            return;
+                        }
+                        let #rs_ident = #res_ident.unwrap();
+                    }
+                }
+            } else {
+                // not a path type; fallback to serde
+                quote! {
+                    let #res_ident = serde_wasm_bindgen::from_value::<#ty>(#val_ident.clone());
+                    if #res_ident.is_err() {
+                        gloo::console::log!(
+                            concat!("Callback error: ", stringify!(#fn_name), ". Wrong argument"),
+                            #res_ident.err().unwrap()
+                        );
+                        return;
+                    }
+                    let #rs_ident = #res_ident.unwrap();
+                }
+            };
+
+            conversions.push(conv);
+        }
+
+        // build a token-list of wasm_bindgen::JsValue types for the trait object
+        let js_types: Vec<proc_macro2::TokenStream> = (0..js_arg_idents.len())
+            .map(|_| quote! { wasm_bindgen::JsValue })
+            .collect();
+
         let expanded = quote! {
-            let cb = Closure::<dyn FnMut(wasm_bindgen::JsValue, wasm_bindgen::JsValue, wasm_bindgen::JsValue)>::new(|val, val2, val3| {
-                #fn_name(1, 2, 3);
-            });
+            let cb = Closure::wrap(Box::new(move | #( #js_arg_idents : #js_types ),* | {
+                #(#conversions)*
+                #fn_name( #(#rs_arg_idents),* );
+            }) as Box<dyn FnMut( #(#js_types),* ) + 'static>);
         };
 
         return expanded;
@@ -93,7 +222,9 @@ fn generate_callback_closure(
 
     if inputs.iter().len() == 2 {
         let expanded = quote! {
-            let cb = Closure::<dyn FnMut(wasm_bindgen::JsValue, wasm_bindgen::JsValue)>::new(|val, val2| {
+            let cb = Closure::<dyn FnMut(#(#js_value_types),*)>::new(
+                |val0, val1| {
+
                 let event = Test1Data {
                     test_parameter: "test".to_string(),
                 };
@@ -109,7 +240,8 @@ fn generate_callback_closure(
 
     if inputs.iter().len() == 1 {
         let expanded = quote! {
-            let cb = Closure::<dyn FnMut(wasm_bindgen::JsValue)>::new(|val| {
+            let cb = Closure::<dyn FnMut(#(#js_value_types),*)>::new(
+                |val0| {
                 let event = Test1Data {
                     test_parameter: "test".to_string(),
                 };
@@ -122,7 +254,8 @@ fn generate_callback_closure(
     }
 
     let expanded = quote! {
-        let cb = Closure::<dyn FnMut()>::new(|| {
+        let cb = Closure::<dyn FnMut(#(#js_value_types),*)>::new(
+            || {
             #fn_name();
         });
     };
