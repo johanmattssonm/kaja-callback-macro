@@ -52,6 +52,19 @@ pub fn callback(attr: TokenStream, item: TokenStream) -> TokenStream {
                 if let Some(window) = web_sys::window() {
                     #callback_closure;
 
+                    let previous = match Reflect::get(window.as_ref(), &JsValue::from_str(#register_fn_name_lit)) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            ::gloo::console::log!("Callback registration check failed:", e);
+                            JsValue::UNDEFINED
+                        }
+                    };
+
+                    if !previous.is_undefined() {
+                        ::gloo::console::log!("Callback already registered: {}. Callbacks are global on the entire document", #register_fn_name_lit);
+                        return;
+                    }
+
                     let _ = Reflect::set(
                         window.as_ref(),
                         &JsValue::from_str(#register_fn_name_lit),
