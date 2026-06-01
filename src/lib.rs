@@ -117,89 +117,17 @@ fn generate_callback_closure(
             .zip(rs_arg_idents.iter())
             .zip(js_arg_idents.iter().zip(rust_arg_types.iter()))
         {
-            // attempt simple conversions for common primitive types to avoid requiring
-            // serde_wasm_bindgen in the consumer crate. Fall back to serde for other types.
-            let conv = if let syn::Type::Path(type_path) = ty {
-                if let Some(seg) = type_path.path.segments.last() {
-                    let ident_str = seg.ident.to_string();
-                    match ident_str.as_str() {
-                        "u32" | "i32" | "usize" | "f64" => {
-                            quote! {
-                                let #res_ident: Option<#ty> = #val_ident.as_f64().map(|v| v as #ty);
-                                if #res_ident.is_none() {
-                                    gloo::console::log!(
-                                        concat!("Callback error: ", stringify!(#fn_name), ". Wrong argument")
-                                    );
-                                    return;
-                                }
-                                let #rs_ident = #res_ident.unwrap();
-                            }
-                        }
-                        "bool" => {
-                            quote! {
-                                let #res_ident: Option<#ty> = #val_ident.as_bool();
-                                if #res_ident.is_none() {
-                                    gloo::console::log!(
-                                        concat!("Callback error: ", stringify!(#fn_name), ". Wrong argument")
-                                    );
-                                    return;
-                                }
-                                let #rs_ident = #res_ident.unwrap();
-                            }
-                        }
-                        "String" => {
-                            quote! {
-                                let #res_ident: Option<#ty> = #val_ident.as_string();
-                                if #res_ident.is_none() {
-                                    gloo::console::log!(
-                                        concat!("Callback error: ", stringify!(#fn_name), ". Wrong argument")
-                                    );
-                                    return;
-                                }
-                                let #rs_ident = #res_ident.unwrap();
-                            }
-                        }
-                        _ => {
-                            quote! {
-                                let #res_ident = serde_wasm_bindgen::from_value::<#ty>(#val_ident.clone());
-                                if #res_ident.is_err() {
-                                    gloo::console::log!(
-                                        concat!("Callback error: ", stringify!(#fn_name), ". Wrong argument"),
-                                        #res_ident.err().unwrap()
-                                    );
-                                    return;
-                                }
-                                let #rs_ident = #res_ident.unwrap();
-                            }
-                        }
-                    }
-                } else {
-                    // fallback
-                    quote! {
-                        let #res_ident = serde_wasm_bindgen::from_value::<#ty>(#val_ident.clone());
-                        if #res_ident.is_err() {
-                            gloo::console::log!(
-                                concat!("Callback error: ", stringify!(#fn_name), ". Wrong argument"),
-                                #res_ident.err().unwrap()
-                            );
-                            return;
-                        }
-                        let #rs_ident = #res_ident.unwrap();
-                    }
+            // always use serde_wasm_bindgen::from_value for all types
+            let conv = quote! {
+                let #res_ident = serde_wasm_bindgen::from_value::<#ty>(#val_ident.clone());
+                if #res_ident.is_err() {
+                    gloo::console::log!(
+                        concat!("Callback error: ", stringify!(#fn_name), ". Wrong argument"),
+                        #res_ident.err().unwrap()
+                    );
+                    return;
                 }
-            } else {
-                // not a path type; fallback to serde
-                quote! {
-                    let #res_ident = serde_wasm_bindgen::from_value::<#ty>(#val_ident.clone());
-                    if #res_ident.is_err() {
-                        gloo::console::log!(
-                            concat!("Callback error: ", stringify!(#fn_name), ". Wrong argument"),
-                            #res_ident.err().unwrap()
-                        );
-                        return;
-                    }
-                    let #rs_ident = #res_ident.unwrap();
-                }
+                let #rs_ident = #res_ident.unwrap();
             };
 
             conversions.push(conv);
