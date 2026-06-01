@@ -1,5 +1,4 @@
 use proc_macro::TokenStream;
-use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::{parse_macro_input, FnArg, Ident, ItemFn, LitStr};
 
@@ -110,145 +109,42 @@ fn generate_callback_closure(
         }
     }
 
-    if inputs.len() == 3 {
-        let mut conversions = Vec::new();
-        for ((res_ident, rs_ident), (val_ident, ty)) in temp_result_idents
-            .iter()
-            .zip(rs_arg_idents.iter())
-            .zip(js_arg_idents.iter().zip(rust_arg_types.iter()))
-        {
-            // always use serde_wasm_bindgen::from_value for all types
-            let conv = quote! {
-                let #res_ident = serde_wasm_bindgen::from_value::<#ty>(#val_ident.clone());
-                if #res_ident.is_err() {
-                    gloo::console::log!(
-                        concat!("Callback error: ", stringify!(#fn_name), ". Wrong argument"),
-                        #res_ident.err().unwrap()
-                    );
-                    return;
-                }
-                let #rs_ident = #res_ident.unwrap();
-            };
-
-            conversions.push(conv);
-        }
-
-        // build a token-list of wasm_bindgen::JsValue types for the trait object
-        let js_types: Vec<proc_macro2::TokenStream> = (0..js_arg_idents.len())
-            .map(|_| quote! { wasm_bindgen::JsValue })
-            .collect();
-
-        let expanded = quote! {
-            let cb = Closure::wrap(Box::new(move | #( #js_arg_idents : #js_types ),* | {
-                #(#conversions)*
-                #fn_name( #(#rs_arg_idents),* );
-            }) as Box<dyn FnMut( #(#js_types),* ) + 'static>);
-        };
-
-        return expanded;
-    }
-
-    if inputs.iter().len() == 2 {
-        let expanded = quote! {
-            let cb = Closure::<dyn FnMut(#(#js_value_types),*)>::new(
-                |val0, val1| {
-
-                let event = Test1Data {
-                    test_parameter: "test".to_string(),
-                };
-
-                let event2 = "serialized".to_string();
-
-                #fn_name(event, event2);
-            });
-        };
-
-        return expanded;
-    }
-
-    if inputs.iter().len() == 1 {
-        let expanded = quote! {
-            let cb = Closure::<dyn FnMut(#(#js_value_types),*)>::new(
-                |val0| {
-                let event = Test1Data {
-                    test_parameter: "test".to_string(),
-                };
-
-                #fn_name(event);
-            });
-        };
-
-        return expanded;
-    }
-
-    let expanded = quote! {
-        let cb = Closure::<dyn FnMut(#(#js_value_types),*)>::new(
-            || {
-            #fn_name();
-        });
-    };
-
-    return expanded;
-
-    let mut js_arg_idents: Vec<syn::Ident> = Vec::new(); // val0, val1, ... lambda arguments
-    let mut rust_arg_types: Vec<syn::Type> = Vec::new(); // extracted types form the annotated rust function
-    let mut rs_arg_idents: Vec<syn::Ident> = Vec::new(); // arg0, arg1, ... converted from val0, val1,
-    let mut temp_result_idents: Vec<syn::Ident> = Vec::new(); // res0, res1, ... result for serde parser
-
-    for (i, arg) in inputs.iter().enumerate() {
-        let span = Span::call_site();
-        let val_ident = syn::Ident::new(&format!("val{}", i), span);
-        js_arg_idents.push(val_ident);
-
-        let rs_ident = syn::Ident::new(&format!("arg{}", i), span);
-        rs_arg_idents.push(rs_ident);
-
-        let res_ident = syn::Ident::new(&format!("res{}", i), span);
-        temp_result_idents.push(res_ident);
-
-        match arg {
-            FnArg::Typed(pat_type) => {
-                rust_arg_types.push((*pat_type.ty).clone());
-            }
-            _ => panic!("expected typed argument"),
-        }
-    }
-
-    let js_value_type = quote! { wasm_bindgen::JsValue };
-    let js_types: Vec<proc_macro2::TokenStream> = (0..js_arg_idents.len())
-        .map(|_| js_value_type.clone())
-        .collect();
-
+    //if inputs.len() == 3 {
     let mut conversions = Vec::new();
     for ((res_ident, rs_ident), (val_ident, ty)) in temp_result_idents
         .iter()
         .zip(rs_arg_idents.iter())
         .zip(js_arg_idents.iter().zip(rust_arg_types.iter()))
     {
-        conversions.push(quote! {
+        // always use serde_wasm_bindgen::from_value for all types
+        let conv = quote! {
             let #res_ident = serde_wasm_bindgen::from_value::<#ty>(#val_ident.clone());
             if #res_ident.is_err() {
                 gloo::console::log!(
-                    concat!("Callback error: ", stringify!(#fn_name), ". Wrong argument type: "),
+                    concat!("Callback error: ", stringify!(#fn_name), ". Wrong argument"),
                     #res_ident.err().unwrap()
                 );
                 return;
             }
             let #rs_ident = #res_ident.unwrap();
-        });
+        };
+
+        conversions.push(conv);
     }
 
-    let call_args = rs_arg_idents.iter();
-    let cb_tokens = quote! {
-        let cb = Closure::wrap(Box::new(move | #(#js_arg_idents),* | {
-            #(#conversions)*
+    // build a token-list of wasm_bindgen::JsValue types for the trait object
+    let js_types: Vec<proc_macro2::TokenStream> = (0..js_arg_idents.len())
+        .map(|_| quote! { wasm_bindgen::JsValue })
+        .collect();
 
-            // call the original Rust function with the converted args
-            #fn_name( #(#call_args),* );
+    let expanded = quote! {
+        let cb = Closure::wrap(Box::new(move | #( #js_arg_idents : #js_types ),* | {
+            #(#conversions)*
+            #fn_name( #(#rs_arg_idents),* );
         }) as Box<dyn FnMut( #(#js_types),* ) + 'static>);
     };
 
-    cb_tokens
+    return expanded;
 }
 
 struct CallbackArg {
