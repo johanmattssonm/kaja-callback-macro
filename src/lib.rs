@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, ItemFn, LitStr};
+use syn::{parse_macro_input, FnArg, ItemFn, LitStr};
 
 /// This macro makes sure a function is registerd in JS DOM Window for a given callback
 /// in the Kaja Web Framework (WebAssembly, Rust).
@@ -37,11 +37,31 @@ pub fn callback(attr: TokenStream, item: TokenStream) -> TokenStream {
     let register_fn_name = syn::Ident::new(&format!("{}_register", fn_name), fn_name.span());
     let register_fn_name_lit = LitStr::new(&register_fn_name.to_string(), register_fn_name.span());
 
-    let expanded = {
-        let inputs = &input_fn.sig.inputs;
-        let inputs_len = inputs.len();
+    // Extract single argument type
+    let arg = input_fn
+        .sig
+        .inputs
+        .first()
+        .expect("callback must have one argument");
 
-        // No argument: ignore the JsValue passed from JS and call the function directly.
+    let arg_type1 = match arg {
+        FnArg::Typed(pat_type) => &pat_type.ty,
+        _ => panic!("expected typed argument"),
+    };
+
+    let arg2 = input_fn
+        .sig
+        .inputs
+        .iter()
+        .nth(1)
+        .expect("callback must have one argument");
+
+    let arg_type2 = match arg2 {
+        FnArg::Typed(pat_type) => &pat_type.ty,
+        _ => panic!("expected typed argument"),
+    };
+
+    let expanded = {
         quote! {
             #vis #sig #fn_block
 
@@ -53,8 +73,27 @@ pub fn callback(attr: TokenStream, item: TokenStream) -> TokenStream {
                 use wasm_bindgen::JsValue;
 
                 if let Some(window) = web_sys::window() {
-                    let cb = Closure::<dyn FnMut(wasm_bindgen::JsValue)>::new(|_val| {
-                        #fn_name();
+                    let callback_js_closure = Closure::<dyn FnMut(wasm_bindgen::JsValue, wasm_bindgen::JsValue)>::new(|val, val2| {
+                        let event: #arg_type1 =
+                            serde_wasm_bindgen::from_value(val);
+
+                        if event.is_err() {
+                            gloo::console::log!("Callback error: {}. Wrong argument type: {}", fn_name, event.err().unwrap());
+                            return;
+                        }
+
+                        let event2: #arg_type2 =
+                            serde_wasm_bindgen::from_value(val2);
+
+                        if event2.is_err() {
+                            gloo::console::log!("Callback error: {}. Wrong argument type: {}", fn_name, event2.err().unwrap());
+                            return;
+                        }
+
+                        let event = event.unwrap();
+                        let event2 = event.unwrap();
+
+                        #fn_name(event, event2);
                     });
 
                     let _ = Reflect::set(
