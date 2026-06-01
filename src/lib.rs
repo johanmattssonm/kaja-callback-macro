@@ -73,6 +73,31 @@ pub fn callback(attr: TokenStream, item: TokenStream) -> TokenStream {
     TokenStream::from(expanded)
 }
 
+// The closure will look like this:
+/*
+    let callback_js_closure = Closure::<dyn FnMut(wasm_bindgen::JsValue, wasm_bindgen::JsValue)>::new(|val, val2| {
+        let event: SomeStruct =
+            serde_wasm_bindgen::from_value(val);
+
+        if event.is_err() {
+            gloo::console::log!("Callback error: {}. Wrong argument type: {}", fn_name, event.err().unwrap());
+            return;
+        }
+
+        let event2: u32 =
+            serde_wasm_bindgen::from_value(val2);
+
+        if event2.is_err() {
+            gloo::console::log!("Callback error: {}. Wrong argument type: {}", fn_name, event2.err().unwrap());
+            return;
+        }
+
+        let event = event.unwrap();
+        let event2 = event.unwrap();
+
+        the_rust_callback_function(event, event2);
+    });
+*/
 fn generate_callback_closure(
     fn_name: &Ident,
     inputs: syn::punctuated::Punctuated<FnArg, syn::token::Comma>,
@@ -109,14 +134,12 @@ fn generate_callback_closure(
         }
     }
 
-    //if inputs.len() == 3 {
     let mut conversions = Vec::new();
     for ((res_ident, rs_ident), (val_ident, ty)) in temp_result_idents
         .iter()
         .zip(rs_arg_idents.iter())
         .zip(js_arg_idents.iter().zip(rust_arg_types.iter()))
     {
-        // always use serde_wasm_bindgen::from_value for all types
         let conv = quote! {
             let #res_ident = serde_wasm_bindgen::from_value::<#ty>(#val_ident.clone());
             if #res_ident.is_err() {
@@ -132,7 +155,6 @@ fn generate_callback_closure(
         conversions.push(conv);
     }
 
-    // build a token-list of wasm_bindgen::JsValue types for the trait object
     let js_types: Vec<proc_macro2::TokenStream> = (0..js_arg_idents.len())
         .map(|_| quote! { wasm_bindgen::JsValue })
         .collect();
@@ -152,7 +174,7 @@ struct CallbackArg {
     span: proc_macro2::Span,
 }
 
-// remoce quote if present
+// remove quote if present
 impl syn::parse::Parse for CallbackArg {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         if input.peek(LitStr) {
