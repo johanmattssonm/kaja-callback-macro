@@ -38,7 +38,9 @@ pub fn callback(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let register_fn_name = syn::Ident::new(&format!("{}_register", fn_name), fn_name.span());
     let register_fn_name_lit = LitStr::new(&register_fn_name.to_string(), register_fn_name.span());
-    let callback_closure = generate_callback_closure(&fn_name, input_fn.sig.inputs.clone());
+    let is_async = input_fn.sig.asyncness.is_some();
+    let callback_closure =
+        generate_callback_closure(&fn_name, input_fn.sig.inputs.clone(), is_async);
 
     let expanded = {
         quote! {
@@ -116,6 +118,7 @@ pub fn callback(attr: TokenStream, item: TokenStream) -> TokenStream {
 fn generate_callback_closure(
     fn_name: &Ident,
     inputs: syn::punctuated::Punctuated<FnArg, syn::token::Comma>,
+    is_async: bool,
 ) -> proc_macro2::TokenStream {
     use proc_macro2::Span;
     use quote::quote;
@@ -174,10 +177,22 @@ fn generate_callback_closure(
         .map(|_| quote! { wasm_bindgen::JsValue })
         .collect();
 
+    let call_block = if is_async {
+        quote! {
+            ::wasm_bindgen_futures::spawn_local(async move {
+                #fn_name( #(#rs_arg_idents),* ).await;
+            });
+        }
+    } else {
+        quote! {
+            #fn_name( #(#rs_arg_idents),* );
+        }
+    };
+
     let expanded = quote! {
         let cb = Closure::wrap(Box::new(move | #( #js_arg_idents : #js_types ),* | {
             #(#conversions)*
-            #fn_name( #(#rs_arg_idents),* );
+            #call_block
         }) as Box<dyn FnMut( #(#js_types),* ) + 'static>);
     };
 
