@@ -72,12 +72,12 @@ pub fn callback(attr: TokenStream, item: TokenStream) -> TokenStream {
                     let _ = Reflect::set(
                         window.as_ref(),
                         &JsValue::from_str(#register_fn_name_lit),
-                        cb.as_ref().unchecked_ref(),
+                        callback_closure.as_ref().unchecked_ref(),
                     );
 
                     let key = JsValue::from_str(#js_name_lit);
-                    let _ = Reflect::set(window.as_ref(), &key, cb.as_ref().unchecked_ref());
-                    cb.forget();
+                    let _ = Reflect::set(window.as_ref(), &key, callback_closure.as_ref().unchecked_ref());
+                    callback_closure.forget();
                 }
             }
 
@@ -158,16 +158,25 @@ fn generate_callback_closure(
         .zip(rs_arg_idents.iter())
         .zip(js_arg_idents.iter().zip(rust_arg_types.iter()))
     {
-        let conv = quote! {
-            let #res_ident = serde_wasm_bindgen::from_value::<#ty>(#val_ident.clone());
-            if #res_ident.is_err() {
-                gloo::console::log!(
-                    concat!("Callback error: ", stringify!(#fn_name), ". Wrong argument"),
-                    #res_ident.err().unwrap()
-                );
-                return;
+        // If the expected Rust type is (or contains) JsValue, skip serde conversion and
+        // pass the JsValue through directly.
+        let ty_tokens = quote! { #ty }.to_string();
+        let conv = if ty_tokens.contains("JsValue") {
+            quote! {
+                let #rs_ident = #val_ident;
             }
-            let #rs_ident = #res_ident.unwrap();
+        } else {
+            quote! {
+                let #res_ident = serde_wasm_bindgen::from_value::<#ty>(#val_ident.clone());
+                if #res_ident.is_err() {
+                    gloo::console::log!(
+                        concat!("Callback error: ", stringify!(#fn_name), ". Wrong argument"),
+                        #res_ident.err().unwrap()
+                    );
+                    return;
+                }
+                let #rs_ident = #res_ident.unwrap();
+            }
         };
 
         conversions.push(conv);
@@ -190,7 +199,7 @@ fn generate_callback_closure(
     };
 
     let expanded = quote! {
-        let cb = Closure::wrap(Box::new(move | #( #js_arg_idents : #js_types ),* | {
+        let callback_closure = Closure::wrap(Box::new(move | #( #js_arg_idents : #js_types ),* | {
             #(#conversions)*
             #call_block
         }) as Box<dyn FnMut( #(#js_types),* ) + 'static>);
