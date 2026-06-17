@@ -9,6 +9,8 @@ use syn::{parse_macro_input, FnArg, Ident, ItemFn, LitStr};
 ///
 /// Example usage:
 /// ```
+/// kaja_web::prelude::*;
+///
 /// #[derive(serde::Deserialize)]
 /// struct SomeClickEvent {
 ///     índex: usize,
@@ -26,6 +28,9 @@ use syn::{parse_macro_input, FnArg, Ident, ItemFn, LitStr};
 ///     })">Run WASM Callback</button>
 /// }};
 /// ```
+///
+/// The program using this macro need to call `init_callback()` at startup
+/// in order to have make the callbacks available in JavaScript.
 #[proc_macro_attribute]
 pub fn callback(attr: TokenStream, item: TokenStream) -> TokenStream {
     let callback_arg = parse_macro_input!(attr as CallbackArg);
@@ -123,11 +128,11 @@ fn generate_callback_closure(
     use proc_macro2::Span;
     use quote::quote;
 
-    let mut js_value_types: Vec<proc_macro2::TokenStream> = Vec::new(); // array of wasm_bindgen::JsValue,
-    let mut js_arg_idents: Vec<syn::Ident> = Vec::new(); // val0, val1, ... lambda arguments
-    let mut rust_arg_types: Vec<syn::Type> = Vec::new(); // extracted types form the annotated rust function
-    let mut rs_arg_idents: Vec<syn::Ident> = Vec::new(); // arg0, arg1, ... converted from val0, val1,
-    let mut temp_result_idents: Vec<syn::Ident> = Vec::new(); // res0, res1, ... result from serde parser
+    let mut js_value_types: Vec<proc_macro2::TokenStream> = Vec::new();
+    let mut js_arg_idents: Vec<syn::Ident> = Vec::new();
+    let mut rust_arg_types: Vec<syn::Type> = Vec::new();
+    let mut rs_arg_idents: Vec<syn::Ident> = Vec::new();
+    let mut temp_result_idents: Vec<syn::Ident> = Vec::new();
 
     for (i, arg) in inputs.iter().enumerate() {
         let span = Span::call_site();
@@ -158,12 +163,28 @@ fn generate_callback_closure(
         .zip(rs_arg_idents.iter())
         .zip(js_arg_idents.iter().zip(rust_arg_types.iter()))
     {
-        // If the expected Rust type is (or contains) JsValue, skip serde conversion and
+        // If the expected Rust type is JsValue, skip serde conversion and
         // pass the JsValue through directly.
         let ty_tokens = quote! { #ty }.to_string();
         let conv = if ty_tokens.contains("JsValue") {
             quote! {
                 let #rs_ident = #val_ident;
+            }
+        } else if ty_tokens.contains("web_sys")
+            || ty_tokens.contains("js_sys")
+            || ty_tokens.contains("wasm_bindgen")
+        {
+            // Convert JsValue -> web_sys/js_sys type using JsCast::dyn_into
+            quote! {
+                let #res_ident = #val_ident.clone().dyn_into::<#ty>();
+                if #res_ident.is_err() {
+                    gloo::console::log!(
+                        concat!("Callback error: ", stringify!(#fn_name), ". Wrong argument"),
+                        #res_ident.err().unwrap()
+                    );
+                    return;
+                }
+                let #rs_ident = #res_ident.unwrap();
             }
         } else {
             quote! {
