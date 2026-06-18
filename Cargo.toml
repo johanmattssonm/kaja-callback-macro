@@ -1,7 +1,12 @@
 [package]
 name = "kaja-callback-macro"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
+description = "Callback macro for kaja-web"
+license = "MIT"
+repository = "https://github.com/johanmattssonm/kaja-callback-macro"
+readme = "README.md"
+keywords = ["web", "wasm", "rust", "webassembly", "frontend"]
 
 [lib]
 proc-macro = true
@@ -13,7 +18,6 @@ proc-macro2 = "1"
 gloo = "0.12.0"
 
 [dev-dependencies]
-# Dependencies required for compiling integration tests that use the generated wasm bindings
 kaja-html-macro = "1.0.3"
 wasm-bindgen = "0.2"
 js-sys = "0.3"
