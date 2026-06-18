@@ -1,8 +1,11 @@
+// Copyright (c) 2026 Johan Mattsson
+// License: MIT
+
 #![doc = include_str!("../README.md")]
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, FnArg, Ident, ItemFn, LitStr};
+use syn::{FnArg, Ident, ItemFn, LitStr, parse_macro_input};
 
 /// This macro makes sure a function is registerd in JS DOM Window for a given callback
 /// in the Kaja Web Framework (WebAssembly, Rust).
