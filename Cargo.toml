@@ -18,11 +18,13 @@ proc-macro2 = "1"
 gloo = "0.12.0"
 
 [dev-dependencies]
+gloo = "0.12.0"
+gloo-console = "0.4.0"
 kaja-html-macro = "1.0.3"
-wasm-bindgen = "0.2"
-js-sys = "0.3"
-web-sys = { version = "0.3", features = ["Window"] }
+wasm-bindgen = "0.2.122"
+web-sys = { version = "0.3.99", features = ["Document", "HtmlDocument", "Element", "HtmlElement", "HtmlInputElement", "NodeList"] }
 serde = { version = "1.0", features = ["derive"] }
-serde-wasm-bindgen = "0.6"
-inventory = "0.1"
-wasm-bindgen-test = "0.3"
+serde-wasm-bindgen = "0.5"
+inventory = "0.3.24"
+js-sys = "0.3"
+wasm-bindgen-futures = "0.4.72"

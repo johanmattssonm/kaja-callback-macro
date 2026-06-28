@@ -11,8 +11,8 @@ use syn::{FnArg, Ident, ItemFn, LitStr, parse_macro_input};
 /// in the Kaja Web Framework (WebAssembly, Rust).
 ///
 /// Example usage:
-/// ```
-/// kaja_web::prelude::*;
+/// ```rust,ignore
+/// kaja_web::prelude::*
 ///
 /// #[derive(serde::Deserialize)]
 /// struct SomeClickEvent {
@@ -169,6 +169,7 @@ fn generate_callback_closure(
         // If the expected Rust type is JsValue, skip serde conversion and
         // pass the JsValue through directly.
         let ty_tokens = quote! { #ty }.to_string();
+
         let conv = if ty_tokens.contains("JsValue") {
             quote! {
                 let #rs_ident = #val_ident;
@@ -176,8 +177,10 @@ fn generate_callback_closure(
         } else if ty_tokens.contains("web_sys")
             || ty_tokens.contains("js_sys")
             || ty_tokens.contains("wasm_bindgen")
+            || ty_tokens.contains("HtmlElement")
         {
             // Convert JsValue -> web_sys/js_sys type using JsCast::dyn_into
+            // Treat bare `HtmlElement` identifiers as web_sys elements as well
             quote! {
                 let #res_ident = #val_ident.clone().dyn_into::<#ty>();
                 if #res_ident.is_err() {

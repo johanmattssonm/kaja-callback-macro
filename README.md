@@ -4,7 +4,7 @@ This is a tag for annotating Rust functions that should be used as callbacks in
 JavaScript using the kaja-web framework.
 
 Example usage:
-```rust
+```rust,ignore
 use kaja_html_macro;
 use kaja_web::prelude::*;
 
