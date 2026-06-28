@@ -47,8 +47,12 @@ pub fn callback(attr: TokenStream, item: TokenStream) -> TokenStream {
     let register_fn_name = syn::Ident::new(&format!("{}_register", fn_name), fn_name.span());
     let register_fn_name_lit = LitStr::new(&register_fn_name.to_string(), register_fn_name.span());
     let is_async = input_fn.sig.asyncness.is_some();
-    let callback_closure =
-        generate_callback_closure(&fn_name, input_fn.sig.inputs.clone(), is_async);
+    let callback_closure = generate_callback_closure(
+        &fn_name,
+        input_fn.sig.inputs.clone(),
+        is_async,
+        &input_fn.sig.output,
+    );
 
     let expanded = {
         quote! {
@@ -127,6 +131,7 @@ fn generate_callback_closure(
     fn_name: &Ident,
     inputs: syn::punctuated::Punctuated<FnArg, syn::token::Comma>,
     is_async: bool,
+    return_type: &syn::ReturnType,
 ) -> proc_macro2::TokenStream {
     use proc_macro2::Span;
     use quote::quote;
@@ -188,7 +193,7 @@ fn generate_callback_closure(
                         concat!("Callback error: ", stringify!(#fn_name), ". Wrong argument"),
                         #res_ident.err().unwrap()
                     );
-                    return;
+                    return JsValue::UNDEFINED;
                 }
                 let #rs_ident = #res_ident.unwrap();
             }
@@ -200,7 +205,7 @@ fn generate_callback_closure(
                         concat!("Callback error: ", stringify!(#fn_name), ". Wrong argument"),
                         #res_ident.err().unwrap()
                     );
-                    return;
+                    return JsValue::UNDEFINED;
                 }
                 let #rs_ident = #res_ident.unwrap();
             }
@@ -213,23 +218,103 @@ fn generate_callback_closure(
         .map(|_| quote! { wasm_bindgen::JsValue })
         .collect();
 
-    let call_block = if is_async {
-        quote! {
-            ::wasm_bindgen_futures::spawn_local(async move {
-                #fn_name( #(#rs_arg_idents),* ).await;
-            });
+    // Build the call + conversion to JsValue for the function's return value.
+    let ret_handling = match return_type {
+        syn::ReturnType::Default => {
+            // no return type -> return undefined
+            quote! {
+                #fn_name( #(#rs_arg_idents),* );
+                JsValue::UNDEFINED
+            }
         }
-    } else {
-        quote! {
-            #fn_name( #(#rs_arg_idents),* );
+        syn::ReturnType::Type(_, ty) => {
+            let ret_ty_tokens = quote! { #ty }.to_string();
+
+            if ret_ty_tokens.contains("JsValue") {
+                // function returns a JsValue directly
+                quote! {
+                    let res = #fn_name( #(#rs_arg_idents),* );
+                    res
+                }
+            } else if ret_ty_tokens.contains("web_sys")
+                || ret_ty_tokens.contains("js_sys")
+                || ret_ty_tokens.contains("wasm_bindgen")
+                || ret_ty_tokens.contains("HtmlElement")
+            {
+                // web_sys/js_sys types -> convert to JsValue via Into
+                quote! {
+                    let res = #fn_name( #(#rs_arg_idents),* );
+                    wasm_bindgen::JsValue::from(res)
+                }
+            } else {
+                // fallback: serialize with serde_wasm_bindgen
+                quote! {
+                    let res = #fn_name( #(#rs_arg_idents),* );
+                    match serde_wasm_bindgen::to_value(&res) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            ::gloo::console::error!(
+                                concat!("Callback error: ", stringify!(#fn_name), ". Serialize error"),
+                                e
+                            );
+                            JsValue::UNDEFINED
+                        }
+                    }
+                }
+            }
         }
     };
 
-    let expanded = quote! {
-        let callback_closure = Closure::wrap(Box::new(move | #( #js_arg_idents : #js_types ),* | {
-            #(#conversions)*
-            #call_block
-        }) as Box<dyn FnMut( #(#js_types),* ) + 'static>);
+    // Build async conversion logic (returns Result<JsValue, JsValue> inside the future)
+    let async_conv = match return_type {
+        syn::ReturnType::Default => quote! { Ok(JsValue::UNDEFINED) },
+        syn::ReturnType::Type(_, ty) => {
+            let ret_ty_tokens = quote! { #ty }.to_string();
+            if ret_ty_tokens.contains("JsValue") {
+                quote! { Ok(ret) }
+            } else if ret_ty_tokens.contains("web_sys")
+                || ret_ty_tokens.contains("js_sys")
+                || ret_ty_tokens.contains("wasm_bindgen")
+                || ret_ty_tokens.contains("HtmlElement")
+            {
+                quote! { Ok(wasm_bindgen::JsValue::from(ret)) }
+            } else {
+                quote! {
+                    match serde_wasm_bindgen::to_value(&ret) {
+                        Ok(v) => Ok(v),
+                        Err(e) => {
+                            ::gloo::console::error!(
+                                concat!("Callback error: ", stringify!(#fn_name), ". Serialize error"),
+                                e
+                            );
+                            Ok(JsValue::UNDEFINED)
+                        }
+                    }
+                }
+            }
+        }
+    };
+
+    let expanded = if is_async {
+        // For async functions return a Promise (JsValue) by using future_to_promise
+        quote! {
+            let callback_closure = Closure::wrap(Box::new(move | #( #js_arg_idents : #js_types ),* | -> wasm_bindgen::JsValue {
+                #(#conversions)*
+                let promise = ::wasm_bindgen_futures::future_to_promise(async move {
+                    let ret = #fn_name( #(#rs_arg_idents),* ).await;
+                    #async_conv
+                });
+
+                promise.into()
+            }) as Box<dyn FnMut( #(#js_types),* ) -> wasm_bindgen::JsValue + 'static>);
+        }
+    } else {
+        quote! {
+            let callback_closure = Closure::wrap(Box::new(move | #( #js_arg_idents : #js_types ),* | -> wasm_bindgen::JsValue {
+                #(#conversions)*
+                #ret_handling
+            }) as Box<dyn FnMut( #(#js_types),* ) -> wasm_bindgen::JsValue + 'static>);
+        }
     };
 
     return expanded;
