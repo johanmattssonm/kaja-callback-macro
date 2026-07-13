@@ -1,3 +1,5 @@
+cargo-features = ["edition2024"]
+
 [package]
 name = "kaja-callback-macro"
 version = "1.0.0"
@@ -20,7 +22,7 @@ gloo = "0.12.0"
 [dev-dependencies]
 gloo = "0.12.0"
 gloo-console = "0.4.0"
-kaja-html-macro = "1.0.3"
+kaja-html-macro = "1.0.5"
 wasm-bindgen = "0.2.122"
 web-sys = { version = "0.3.99", features = ["Document", "HtmlDocument", "Element", "HtmlElement", "HtmlInputElement", "NodeList"] }
 serde = { version = "1.0", features = ["derive"] }
