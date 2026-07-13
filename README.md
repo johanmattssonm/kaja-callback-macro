@@ -24,6 +24,12 @@ let html = html! {{
         index: 1
     })">Run WASM Callback</button>
 }};
+
+#[wasm_bindgen(start)]
+pub fn init() {
+    // make the callbacks available to JavaScript
+    init_callbacks(); 
+}
 ```
 
 ## Home Page
