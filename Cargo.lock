@@ -382,7 +382,7 @@ dependencies = [
 
 [[package]]
 name = "kaja-callback-macro"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "gloo",
  "gloo-console",

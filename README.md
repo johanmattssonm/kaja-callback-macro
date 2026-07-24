@@ -18,12 +18,16 @@ fn some_on_click_function(event: SomeClickEvent) {
     log!("event.index: {:?}", event.index);
 }
 
-// This example allows you to call the Rust function from JavaScript like this:
-let html = html! {{
-    <button onclick="someClickCallback({
-        index: 1
-    })">Run WASM Callback</button>
-}};
+pub fn example() -> String {
+    // This example allows you to call the Rust function from JavaScript like this:
+    let html = html! {{
+        <button onclick="someClickCallback({
+            index: 1
+        })">Run WASM Callback</button>
+    }};
+
+    html
+}
 
 #[wasm_bindgen(start)]
 pub fn init() {
