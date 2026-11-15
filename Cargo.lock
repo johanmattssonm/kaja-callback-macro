@@ -382,7 +382,7 @@ dependencies = [
 
 [[package]]
 name = "kaja-callback-macro"
-version = "1.0.2"
+version = "1.1.0"
 dependencies = [
  "gloo",
  "gloo-console",
@@ -401,9 +401,9 @@ dependencies = [
 
 [[package]]
 name = "kaja-html-macro"
-version = "1.0.5"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5c37d76721e795460d8ba194309f8c989a64a66dc79118de9dccc083e5fe9db"
+checksum = "12a4bb2370b1641375b5fa1d4339c3de130ba4db78197781458742f78ef4acda"
 dependencies = [
  "proc-macro-error",
  "proc-macro2",
