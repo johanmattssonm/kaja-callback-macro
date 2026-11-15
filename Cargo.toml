@@ -1,6 +1,6 @@
 [package]
 name = "kaja-callback-macro"
-version = "1.0.2"
+version = "1.1.0"
 edition = "2024"
 description = "Callback macro for kaja-web"
 license = "MIT"
@@ -20,7 +20,7 @@ gloo = "0.12.0"
 [dev-dependencies]
 gloo = "0.12.0"
 gloo-console = "0.4.0"
-kaja-html-macro = "1.0.5"
+kaja-html-macro = "1.1.0"
 wasm-bindgen = "0.2.122"
 web-sys = { version = "0.3.99", features = ["Document", "HtmlDocument", "Element", "HtmlElement", "HtmlInputElement", "NodeList"] }
 serde = { version = "1.0", features = ["derive"] }
