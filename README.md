@@ -1,4 +1,4 @@
-# Callback Macro
+## Callback Macro
 
 This is a tag for annotating Rust functions that should be used as callbacks in
 JavaScript using the kaja-web framework.
